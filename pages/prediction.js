@@ -109,12 +109,16 @@ export default function FloodPrediction() {
   const handleSendAlert = async () => {
     if (!predictionResult) return;
 
+    const riskPercent = (typeof predictionResult.rule_score === 'number'
+      ? predictionResult.rule_score * 100
+      : predictionResult.confidence);
+
     setSendingAlert(true);
     try {
       const message = `🚨 FLOOD ALERT from ${selectedDistrict}
       
 Risk Level: ${predictionResult.risk_level.toUpperCase()}
-Confidence: ${predictionResult.confidence.toFixed(1)}%
+Risk Score: ${riskPercent.toFixed(1)}%
 
 ⚠️ EVACUATE TO SAFE LOCATION IMMEDIATELY!`;
 
@@ -162,6 +166,12 @@ Confidence: ${predictionResult.confidence.toFixed(1)}%
         return 'bg-gray-800';
     }
   };
+
+  const displayedRiskPercent = predictionResult
+    ? (typeof predictionResult.rule_score === 'number'
+      ? predictionResult.rule_score * 100
+      : predictionResult.confidence)
+    : 0;
 
   return (
     <Layout>
@@ -389,7 +399,7 @@ Confidence: ${predictionResult.confidence.toFixed(1)}%
                   Flood Risk Assessment Result
                 </h3>
 
-                <div className="grid grid-cols-3 gap-6 mb-8">
+                <div className="grid grid-cols-2 gap-6 mb-8">
                   {/* Risk Score Circle */}
                   <div className="flex flex-col items-center">
                     <div
@@ -401,7 +411,7 @@ Confidence: ${predictionResult.confidence.toFixed(1)}%
                     >
                       <div className="text-center">
                         <p className="text-4xl font-black text-white">
-                          {predictionResult.confidence.toFixed(0)}%
+                          {displayedRiskPercent.toFixed(0)}%
                         </p>
                         <p className="text-xs text-slate-400 mt-1">Risk Score</p>
                       </div>
@@ -419,16 +429,6 @@ Confidence: ${predictionResult.confidence.toFixed(1)}%
                       </p>
                     </div>
                     <p className="text-xs text-slate-400 mt-4">Risk Level</p>
-                  </div>
-
-                  {/* Confidence Score */}
-                  <div className="flex flex-col items-center">
-                    <div className="text-center">
-                      <p className="text-5xl font-black text-green-400">
-                        {predictionResult.confidence.toFixed(0)}%
-                      </p>
-                      <p className="text-xs text-slate-400 mt-4">Model Confidence</p>
-                    </div>
                   </div>
                 </div>
 

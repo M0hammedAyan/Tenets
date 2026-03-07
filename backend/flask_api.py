@@ -222,6 +222,7 @@ def calculate_risk_score(data):
     }
     return risk_score, components
 
+
 def find_nearest_safe_location(latitude, longitude):
     """Find nearest safe evacuation location"""
     import math
@@ -305,7 +306,7 @@ def predict_flood_risk():
 🚨 <b>FLOOD ALERT - HIGH RISK DETECTED</b>
 
 📊 <b>Risk Level:</b> {risk_level.upper()}
-⚠️ <b>Confidence:</b> {confidence:.1f}%
+⚠️ <b>Risk Score:</b> {confidence:.1f}%
 
 📍 <b>District:</b> {normalized['district']}
 📍 <b>Location:</b> Lat {normalized['latitude']}, Lon {normalized['longitude']}
@@ -323,6 +324,7 @@ def predict_flood_risk():
         
         response = {
             "prediction": float(risk_score),
+            "rule_score": float(risk_score),
             "risk_level": risk_level,
             "confidence": float(confidence),
             "parameters": {
