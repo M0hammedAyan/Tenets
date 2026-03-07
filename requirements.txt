@@ -1,0 +1,90 @@
+# ========================
+# AI Flood Prediction System - Requirements
+# Comprehensive dependencies for integrated flood early warning system
+# ========================
+
+# ============ Core API & Web Framework ============
+fastapi==0.104.1
+uvicorn==0.24.0
+pydantic==2.5.0
+requests==2.32.5
+
+# ============ Frontend & Visualization ============
+streamlit==1.55.0
+streamlit-folium==0.15.1
+folium==0.20.0
+plotly==5.17.0
+altair==6.0.0
+pydeck==0.9.1
+
+# ============ Data Processing & Analysis ============
+pandas==2.3.3
+numpy==2.4.2
+scipy==1.11.4
+
+# ============ Machine Learning & Model Training ============
+scikit-learn==1.3.2
+xgboost==2.0.0
+joblib==1.3.2
+
+# ============ Geospatial & Mapping ============
+geopandas==1.1.2
+shapely==2.1.2
+folium==0.20.0
+osmnx==2.1.0
+pyogrio==0.12.1
+pyproj==3.7.2
+rasterio==1.3.9
+
+# ============ Graph & Network Analysis ============
+networkx==3.6.1
+
+# ============ Alerting & Notifications ============
+twilio==8.10.0
+python-dotenv==1.0.0
+
+# ============ Data Validation & Serialization ============
+pydantic-core==2.14.1
+jsonschema==4.26.0
+
+# ============ Utility & System Libraries ============
+tenacity==9.1.4
+watchdog==6.0.0
+click==8.3.1
+colorama==0.4.6
+python-dateutil==2.9.0.post0
+pytz==2026.1.post1
+Jinja2==3.1.6
+MarkupSafe==3.0.3
+
+# ============ HTTP & Web ============
+urllib3==2.6.3
+certifi==2026.2.25
+
+# ============ Data Serialization ============
+toml==0.10.2
+pillow==12.1.1
+protobuf==6.33.5
+narwhals==2.17.0
+pyarrow==23.0.1
+
+# ============ GitOps & Version Control ============
+GitPython==3.1.46
+gitdb==4.0.12
+
+# ============ Async & Concurrency ============
+tornado==6.5.4
+
+# ============ Additional Geospatial ============
+branca==0.8.2
+xyzservices==2025.11.0
+
+# ============ Notes ============
+# - XGBoost for AI flood predictions
+# - GeoPandas/Folium for map generation  
+# - Twilio for SMS alerts
+# - Streamlit for dashboard interface
+# - FastAPI for REST API endpoints
+# - OSMNX for evacuation route planning
+# - NetworkX for shortest-path routing
+# ========================

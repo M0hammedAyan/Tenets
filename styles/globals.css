@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#__next {
+  height: 100%;
+}
+
+body {
+  @apply bg-background text-slate-100;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-slate-900;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-700 rounded-full;
+}
+
+.card {
+  @apply bg-surface-muted/80 border border-slate-800/80 rounded-xl shadow-soft-lg backdrop-blur-sm;
+}
+
+.card-hover {
+  @apply transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:shadow-lg hover:shadow-cyan-500/10;
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#__next {
+  height: 100%;
+}
+
+body {
+  @apply bg-background text-slate-100;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-slate-900;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-700 rounded-full;
+}
+
+.card {
+  @apply bg-surface-muted/80 border border-slate-800/80 rounded-xl shadow-soft-lg backdrop-blur-sm;
+}
+
+.card-hover {
+  @apply transition-transform duration-150 ease-out hover:-translate-y-0.5 hover:shadow-lg hover:shadow-cyan-500/10;
+}
+

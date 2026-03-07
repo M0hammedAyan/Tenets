@@ -1,0 +1,104 @@
+# -----------------------------
+# Python
+# -----------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python logs
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# -----------------------------
+# Node / React / Next.js
+# -----------------------------
+node_modules/
+.next/
+out/
+dist/
+build/
+
+# npm logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# -----------------------------
+# Environment variables
+# -----------------------------
+.env
+.env.local
+.env.development
+.env.production
+
+# -----------------------------
+# Cache files
+# -----------------------------
+.cache/
+.parcel-cache/
+
+# -----------------------------
+# OS files
+# -----------------------------
+.DS_Store
+Thumbs.db
+
+# -----------------------------
+# IDE / Editor
+# -----------------------------
+.vscode/
+.idea/
+
+# -----------------------------
+# Temporary files
+# -----------------------------
+*.tmp
+*.temp
+
+# -----------------------------
+# Large datasets or models
+# -----------------------------
+data/
+datasets/
+models/
+checkpoints/
+
+node_modules/
+frontend/node_modules/
+.next/
+.venv/
+.cache/
+data/
+*.geojson
+
+# Node
+node_modules/
+frontend/node_modules/
+.next/
+
+# Python
+.venv/
+venv/
+__pycache__/
+
+# Cache
+.cache/
+
+# Environment
+.env
+
+# Logs
+*.log
