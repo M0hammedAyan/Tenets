@@ -90,7 +90,7 @@ Hosted on Netlify:
 ![Rivers](Pictures/River_Monitoring.png)
 
 ### Bot Alert
-![Bot Alert](Pictures/Bot_Alert.png)
+![Bot Alert](Pictures/Bot_Alert.jpeg)
 
 ### Prediction Page
 ![Prediction](Pictures\Flood_Prediction1.png)
