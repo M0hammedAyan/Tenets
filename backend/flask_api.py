@@ -5,6 +5,7 @@ Integrates the beautiful Next.js UI with ML model and Telegram alerts
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import math
 import os
 import sys
 import pickle
@@ -32,8 +33,8 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for React frontend
 
 # Configuration
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '7992738661:AAFg2Mcr3QO6spwZNkyp7cRHe4AEbIgL77w')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '6407126519')
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'models', 'flood_model.pkl')
 
 # Global variables
@@ -94,35 +95,40 @@ def load_model():
 
 def send_telegram_alert(message, location_data=None):
     """
-    Send alert message to Telegram with optional safe location
+    Send alert message to Telegram with optional safe location.
+    Returns False (without raising) if credentials are not configured.
     """
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Warning: Telegram credentials not configured; alert not sent")
+        return False
+
     try:
         # Build message with safe location if provided
         full_message = message
-        
+
         if location_data:
             full_message += f"\n\n🚨 SAFE EVACUATION LOCATION:\n"
             full_message += f"📍 {location_data['name']}\n"
             full_message += f"📊 Capacity: {location_data['capacity']} people\n"
             full_message += f"🗺️ Coordinates: {location_data['location'][0]}, {location_data['location'][1]}\n"
             full_message += f"ℹ️ Type: {location_data['type']}"
-        
+
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {
             "chat_id": TELEGRAM_CHAT_ID,
             "text": full_message,
             "parse_mode": "HTML"
         }
-        
+
         response = requests.post(url, json=payload)
-        
+
         if response.status_code == 200:
             print("Telegram alert sent successfully")
             return True
         else:
             print(f"Failed to send Telegram alert: {response.text}")
             return False
-            
+
     except Exception as e:
         print(f"Error sending Telegram alert: {e}")
         return False
@@ -225,20 +231,18 @@ def calculate_risk_score(data):
 
 def find_nearest_safe_location(latitude, longitude):
     """Find nearest safe evacuation location"""
-    import math
-    
     min_distance = float('inf')
     nearest_location = None
-    
+
     for location in safe_locations:
         lat, lon = location['location']
         # Simple Euclidean distance (can be replaced with Haversine for accuracy)
         distance = math.sqrt((lat - latitude)**2 + (lon - longitude)**2)
-        
+
         if distance < min_distance:
             min_distance = distance
             nearest_location = location
-    
+
     return nearest_location
 
 # ==================== API ENDPOINTS ====================
@@ -385,7 +389,6 @@ def get_safe_locations():
         
         if latitude and longitude:
             # Sort by distance
-            import math
             locations = sorted(
                 locations,
                 key=lambda x: math.sqrt((x['location'][0] - latitude)**2 + (x['location'][1] - longitude)**2)
@@ -410,18 +413,22 @@ def send_alert():
     """
     try:
         data = request.get_json()
-        
+        if not data:
+            return jsonify({"error": "Request body must be valid JSON"}), 400
+        if not data.get('message'):
+            return jsonify({"error": "Missing required field: message"}), 400
+
         safe_location = None
         if data.get('include_safe_location') and data.get('latitude') and data.get('longitude'):
             safe_location = find_nearest_safe_location(data['latitude'], data['longitude'])
-        
+
         success = send_telegram_alert(data['message'], safe_location)
-        
+
         return jsonify({
             "success": success,
             "message": "Alert sent" if success else "Failed to send alert"
         }), 200 if success else 500
-        
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

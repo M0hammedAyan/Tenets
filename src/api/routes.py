@@ -28,10 +28,10 @@ def load_models():
         "ai_model": None,
         "scaler": None
     }
-    
+
+    model_dir = Path(__file__).parent.parent.parent / "models"
+
     try:
-        model_dir = Path(__file__).parent.parent.parent / "models"
-        
         # Load traditional model
         traditional_path = model_dir / "flood_model.pkl"
         if traditional_path.exists():
@@ -39,7 +39,7 @@ def load_models():
                 models["traditional_model"] = pickle.load(f)
     except Exception as e:
         print(f"Warning: Traditional model not loaded - {e}")
-    
+
     try:
         # Load AI model
         ai_path = model_dir / "flood_xgb_model.pkl"
@@ -47,7 +47,7 @@ def load_models():
             models["ai_model"] = joblib.load(ai_path)
     except Exception as e:
         print(f"Warning: AI model not loaded - {e}")
-    
+
     try:
         # Load scaler
         scaler_path = model_dir / "scaler.pkl"
@@ -55,7 +55,7 @@ def load_models():
             models["scaler"] = joblib.load(scaler_path)
     except Exception as e:
         print(f"Warning: Scaler not loaded - {e}")
-    
+
     return models
 
 # Load models on startup

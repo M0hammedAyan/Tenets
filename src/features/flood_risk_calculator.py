@@ -10,14 +10,22 @@ def calculate_flood_risk_index(df):
         'slope': 0.10,
         'river_proximity': 0.10
     }
-    
+
     normalized = df.copy()
-    normalized['rainfall_3hr'] = df['rainfall_3hr'] / df['rainfall_3hr'].max()
-    normalized['rainfall_24hr'] = df['rainfall_24hr'] / df['rainfall_24hr'].max()
-    normalized['soil_moisture'] = df['soil_moisture'] / 100
-    normalized['elevation'] = 1 - (df['elevation'] / df['elevation'].max())
-    normalized['slope'] = 1 - (df['slope'] / df['slope'].max())
-    normalized['river_proximity'] = 1 - (df['river_proximity'] / df['river_proximity'].max())
-    
-    df['flood_risk_index'] = sum(normalized[col] * weights[col] for col in weights.keys())
+
+    for col in ('rainfall_3hr', 'rainfall_24hr', 'elevation', 'slope', 'river_proximity'):
+        if col in df.columns:
+            max_val = df[col].max()
+            if max_val > 0:
+                if col in ('elevation', 'slope', 'river_proximity'):
+                    normalized[col] = 1 - (df[col] / max_val)
+                else:
+                    normalized[col] = df[col] / max_val
+            else:
+                normalized[col] = 0.0
+
+    if 'soil_moisture' in df.columns:
+        normalized['soil_moisture'] = df['soil_moisture'] / 100
+
+    df['flood_risk_index'] = sum(normalized[col] * weights[col] for col in weights.keys() if col in normalized.columns)
     return df
