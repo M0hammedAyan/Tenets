@@ -93,8 +93,8 @@ Hosted on Netlify:
 ![Bot Alert](Pictures/Bot_Alert.jpeg)
 
 ### Prediction Page
-![Prediction](Pictures\Flood_Prediction1.png)
-![Prediction](Pictures\Flood_Prediction2.png)
+![Prediction](Pictures/Flood_Prediction1.png)
+![Prediction](Pictures/Flood_Prediction2.png)
 
 ### Alerts / Warnings
 ![Alerts](Pictures/Alerts_&_Warnings.png)
