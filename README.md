@@ -81,16 +81,23 @@ Hosted on Netlify:
 ## Screenshots
 
 ### Home / Dashboard
-![Dashboard](Pictures/localhost_3000_.png)
-
-### Prediction Page
-![Prediction](Pictures/localhost_3000_%20%281%29.png)
+![Dashboard](Pictures/Dashboard.png)
 
 ### Rainfall View
-![Rainfall](Pictures/localhost_3000_%20%282%29.png)
+![Rainfall](Pictures/Rainfall_Monitoring.png)
 
 ### Rivers / Maps
-![Rivers](Pictures/localhost_3000_%20%283%29.png)
+![Rivers](Pictures/River_Monitoring.png)
+
+### Bot Alert
+![Bot Alert](Pictures/Bot_Alert.png)
+
+### Prediction Page
+![Prediction](Pictures\Flood_Prediction1.png)
+![Prediction](Pictures\Flood_Prediction2.png)
+
+### Alerts / Warnings
+![Alerts](Pictures/Alerts_&_Warnings.png)
 
 ## Repository Notes
 - There is only one README file in this repository: `README.md`.
