@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Layout from '../components/Layout';
-import { Zap, RefreshCw, AlertTriangle, Send } from 'lucide-react';
-import { predictFloodRisk, sendTelegramAlert } from '../utils/floodApi';
+import { Zap, RefreshCw, AlertTriangle } from 'lucide-react';
+import { predictFloodRisk } from '../utils/floodApi';
 
 export default function FloodPrediction() {
   const [selectedDistrict, setSelectedDistrict] = useState('Kodagu');
@@ -14,7 +14,6 @@ export default function FloodPrediction() {
   const [isLoading, setIsLoading] = useState(false);
   const [predictionResult, setPredictionResult] = useState(null);
   const [error, setError] = useState(null);
-  const [sendingAlert, setSendingAlert] = useState(false);
   const activeRequestIdRef = useRef(0);
 
   const districts = [
@@ -105,37 +104,6 @@ export default function FloodPrediction() {
     } finally {
       if (requestId !== activeRequestIdRef.current) return;
       setIsLoading(false);
-    }
-  };
-
-  const handleSendAlert = async () => {
-    if (!predictionResult) return;
-
-    const riskPercent = (typeof predictionResult.rule_score === 'number'
-      ? predictionResult.rule_score * 100
-      : predictionResult.confidence);
-
-    setSendingAlert(true);
-    try {
-      const message = `🚨 FLOOD ALERT from ${selectedDistrict}
-      
-Risk Level: ${predictionResult.risk_level.toUpperCase()}
-Risk Score: ${riskPercent.toFixed(1)}%
-
-⚠️ EVACUATE TO SAFE LOCATION IMMEDIATELY!`;
-
-      await sendTelegramAlert({
-        message,
-        includeSafeLocation: true,
-        latitude: parseFloat(latitude),
-        longitude: parseFloat(longitude),
-      });
-
-      alert('✓ Alert sent to Telegram successfully!');
-    } catch (err) {
-      alert('✗ Failed to send alert: ' + err.message);
-    } finally {
-      setSendingAlert(false);
     }
   };
 
@@ -371,6 +339,7 @@ Risk Score: ${riskPercent.toFixed(1)}%
               <h3 className="text-xl font-bold text-white mb-6 flex items-center">
                 🌤️ Current Weather - {selectedDistrict}
               </h3>
+              <p className="text-xs text-cyan-400 mb-6">Flood scoring runs locally in your browser. This page no longer depends on a separate prediction server.</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="bg-slate-800 rounded-lg p-4 text-center">
                   <p className="text-slate-400 text-xs mb-2">Temperature</p>
@@ -445,30 +414,16 @@ Risk Score: ${riskPercent.toFixed(1)}%
                   </div>
                 )}
 
-                {/* Action Buttons */}
+                {/* Action Guidance */}
                 {(predictionResult.risk_level === 'high' || predictionResult.risk_level === 'critical') && (
                   <div className="bg-red-900/20 border border-red-700 rounded-lg p-4 mb-6">
                     <p className="text-red-400 font-bold mb-4 flex items-center">
                       <AlertTriangle className="h-5 w-5 mr-2" />
                       ⚠️ HIGH FLOOD RISK - IMMEDIATE ACTION REQUIRED
                     </p>
-                    <button
-                      onClick={handleSendAlert}
-                      disabled={sendingAlert}
-                      className="w-full bg-red-600 hover:bg-red-700 disabled:bg-slate-600 text-white font-bold py-3 px-4 rounded-lg transition-all flex items-center justify-center"
-                    >
-                      {sendingAlert ? (
-                        <>
-                          <RefreshCw className="h-5 w-5 mr-2 animate-spin" />
-                          Sending Telegram Alert...
-                        </>
-                      ) : (
-                        <>
-                          <Send className="h-5 w-5 mr-2" />
-                          Send Telegram Alert Now
-                        </>
-                      )}
-                    </button>
+                    <p className="text-sm text-slate-200">
+                      Use the evacuation location above and local emergency channels. Telegram alerts are disabled in this deployment.
+                    </p>
                   </div>
                 )}
               </div>
