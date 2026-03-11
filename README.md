@@ -81,8 +81,7 @@ Hosted on Netlify:
 ## Screenshots
 
 ### Home / Dashboard
-![Dashboard](Pictures/Dashboard.png) width="300" height="200"
-
+![Dashboard](Pictures/Dashboard.png)
 ### Rainfall View
 ![Rainfall](Pictures/Rainfall_Monitoring.png)
 
