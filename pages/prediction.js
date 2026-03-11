@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Layout from '../components/Layout';
 import { Zap, RefreshCw, AlertTriangle, Send } from 'lucide-react';
-import { predictFloodRisk, getSafeLocations, sendTelegramAlert } from '../utils/floodApi';
+import { predictFloodRisk, sendTelegramAlert } from '../utils/floodApi';
 
 export default function FloodPrediction() {
   const [selectedDistrict, setSelectedDistrict] = useState('Kodagu');
@@ -13,9 +13,9 @@ export default function FloodPrediction() {
   
   const [isLoading, setIsLoading] = useState(false);
   const [predictionResult, setPredictionResult] = useState(null);
-  const [safeLocations, setSafeLocations] = useState([]);
   const [error, setError] = useState(null);
   const [sendingAlert, setSendingAlert] = useState(false);
+  const activeRequestIdRef = useRef(0);
 
   const districts = [
     'Bagalkot', 'Ballari', 'Belagavi', 'Bengaluru Rural', 'Bengaluru Urban',
@@ -48,6 +48,9 @@ export default function FloodPrediction() {
 
   const handleRunPrediction = async (e) => {
     e.preventDefault();
+    const requestId = activeRequestIdRef.current + 1;
+    activeRequestIdRef.current = requestId;
+
     setIsLoading(true);
     setError(null);
     setPredictionResult(null);
@@ -76,6 +79,7 @@ export default function FloodPrediction() {
       const invalidInput = Object.entries(parsedInputs).find(([, value]) => !Number.isFinite(value));
       if (invalidInput) {
         const [invalidKey] = invalidInput;
+        if (requestId !== activeRequestIdRef.current) return;
         setError(`Please enter a valid number for ${inputLabels[invalidKey]}.`);
         setIsLoading(false);
         return;
@@ -92,16 +96,14 @@ export default function FloodPrediction() {
         longitude: parsedInputs.longitude,
       });
 
+      if (requestId !== activeRequestIdRef.current) return;
       setPredictionResult(result);
-
-      if (result.risk_level === 'high' || result.risk_level === 'critical') {
-        const locations = await getSafeLocations(parseFloat(latitude), parseFloat(longitude));
-        setSafeLocations(locations);
-      }
     } catch (err) {
-      setError(err.message || 'Failed to run prediction. Is the backend running on localhost:5000?');
+      if (requestId !== activeRequestIdRef.current) return;
+      setError(err.message || 'Failed to run prediction. Check backend health and API URL configuration.');
       console.error('Prediction error:', err);
     } finally {
+      if (requestId !== activeRequestIdRef.current) return;
       setIsLoading(false);
     }
   };

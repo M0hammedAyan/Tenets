@@ -3,7 +3,63 @@
  * Handles flood prediction, alerts, and safe location fetching
  */
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
+export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000').replace(/\/+$/, '');
+const REQUEST_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_API_TIMEOUT_MS || 15000);
+
+function createApiUrl(path, queryParams) {
+  const url = new URL(`${API_BASE_URL}${path}`);
+  if (queryParams) {
+    Object.entries(queryParams).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        url.searchParams.append(key, String(value));
+      }
+    });
+  }
+  return url.toString();
+}
+
+async function requestJson(path, options = {}, timeoutMs = REQUEST_TIMEOUT_MS, queryParams = null) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(createApiUrl(path, queryParams), {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(options.headers || {}),
+      },
+    });
+
+    const rawBody = await response.text();
+    let parsedBody = null;
+    if (rawBody) {
+      try {
+        parsedBody = JSON.parse(rawBody);
+      } catch (_error) {
+        parsedBody = null;
+      }
+    }
+
+    if (!response.ok) {
+      const details = parsedBody?.error || parsedBody?.message || rawBody || `HTTP ${response.status}`;
+      throw new Error(`Request failed (${response.status}): ${details}`);
+    }
+
+    return parsedBody || {};
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error(`Request timed out after ${timeoutMs}ms`);
+    }
+    if (error instanceof TypeError) {
+      throw new Error(`Unable to reach backend API at ${API_BASE_URL}. Check deployment URL and CORS settings.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 /**
  * Make a prediction request to backend
@@ -11,57 +67,29 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000';
  * @returns {Promise<Object>} Prediction response
  */
 export async function predictFloodRisk(params) {
-  try {
-    const month = new Date().getMonth() + 1;
-    const season = month >= 6 && month <= 10 ? 100 : month >= 3 && month <= 5 ? 75 : 50;
-    const fallbackTemperature = 25;
-    const fallbackHumidity = 70;
+  const month = new Date().getMonth() + 1;
+  const season = month >= 6 && month <= 10 ? 100 : month >= 3 && month <= 5 ? 75 : 50;
+  const fallbackTemperature = 25;
+  const fallbackHumidity = 70;
 
-    const response = await fetch(`${API_BASE_URL}/api/predict`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        // New schema
-        district: params.district,
-        rainfall_24h: params.rainfall_24h,
-        rainfall_3h: params.rainfall_3h,
-        river_level: params.river_level,
-        elevation: params.elevation,
-        soil_moisture: params.soil_moisture,
-        latitude: params.latitude,
-        longitude: params.longitude,
-
-        // Legacy schema fallback (for older backend versions still running)
-        rainfall: params.rainfall_24h,
-        discharge: params.rainfall_3h,
-        season,
-        temperature: fallbackTemperature,
-        humidity: fallbackHumidity,
-      }),
-    });
-
-    if (!response.ok) {
-      let details = '';
-      try {
-        const errorData = await response.json();
-        details = errorData?.error ? ` - ${errorData.error}` : '';
-      } catch (_e) {
-        // Ignore JSON parse errors and keep status-only message.
-      }
-      throw new Error(`HTTP error! status: ${response.status}${details}`);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error predicting flood risk:', error);
-    if (error instanceof TypeError) {
-      throw new Error('Unable to reach backend API at http://localhost:5000. Start backend/flask_api.py and try again.');
-    }
-    throw error;
-  }
+  return requestJson('/api/predict', {
+    method: 'POST',
+    body: JSON.stringify({
+      district: params.district,
+      rainfall_24h: params.rainfall_24h,
+      rainfall_3h: params.rainfall_3h,
+      river_level: params.river_level,
+      elevation: params.elevation,
+      soil_moisture: params.soil_moisture,
+      latitude: params.latitude,
+      longitude: params.longitude,
+      rainfall: params.rainfall_24h,
+      discharge: params.rainfall_3h,
+      season,
+      temperature: fallbackTemperature,
+      humidity: fallbackHumidity,
+    }),
+  });
 }
 
 /**
@@ -71,26 +99,16 @@ export async function predictFloodRisk(params) {
  * @returns {Promise<Array>} List of safe locations
  */
 export async function getSafeLocations(latitude, longitude) {
-  try {
-    const params = new URLSearchParams();
-    if (latitude && longitude) {
-      params.append('latitude', latitude);
-      params.append('longitude', longitude);
-    }
-
-    const url = `${API_BASE_URL}/api/safe-locations${params.toString() ? '?' + params : ''}`;
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error fetching safe locations:', error);
-    throw error;
+  const hasCoordinates = Number.isFinite(latitude) && Number.isFinite(longitude);
+  if (!hasCoordinates) {
+    return requestJson('/api/safe-locations', { method: 'GET' });
   }
+  return requestJson('/api/safe-locations', {
+    method: 'GET',
+  }, REQUEST_TIMEOUT_MS, {
+    latitude,
+    longitude,
+  });
 }
 
 /**
@@ -98,19 +116,7 @@ export async function getSafeLocations(latitude, longitude) {
  * @returns {Promise<Array>} List of recent alerts
  */
 export async function getRecentAlerts() {
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/alerts`);
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error fetching alerts:', error);
-    throw error;
-  }
+  return requestJson('/api/alerts', { method: 'GET' });
 }
 
 /**
@@ -119,30 +125,15 @@ export async function getRecentAlerts() {
  * @returns {Promise<Object>} Response from backend
  */
 export async function sendTelegramAlert(alertData) {
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/send-alert`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        message: alertData.message,
-        include_safe_location: alertData.includeSafeLocation || false,
-        latitude: alertData.latitude,
-        longitude: alertData.longitude,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error sending Telegram alert:', error);
-    throw error;
-  }
+  return requestJson('/api/send-alert', {
+    method: 'POST',
+    body: JSON.stringify({
+      message: alertData.message,
+      include_safe_location: alertData.includeSafeLocation || false,
+      latitude: alertData.latitude,
+      longitude: alertData.longitude,
+    }),
+  });
 }
 
 /**
@@ -150,19 +141,7 @@ export async function sendTelegramAlert(alertData) {
  * @returns {Promise<Array>} List of districts
  */
 export async function getDistricts() {
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/districts`);
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error fetching districts:', error);
-    throw error;
-  }
+  return requestJson('/api/districts', { method: 'GET' });
 }
 
 /**
@@ -171,8 +150,8 @@ export async function getDistricts() {
  */
 export async function checkApiHealth() {
   try {
-    const response = await fetch(`${API_BASE_URL}/health`);
-    return response.ok;
+    await requestJson('/health', { method: 'GET' }, 5000);
+    return true;
   } catch (error) {
     console.error('Backend health check failed:', error);
     return false;
@@ -185,13 +164,14 @@ export async function checkApiHealth() {
  * @returns {Object} Formatted prediction data
  */
 export function formatPredictionResponse(prediction) {
+  const parsedDate = new Date(prediction.timestamp);
   return {
     riskLevel: prediction.risk_level,
     confidence: prediction.confidence,
     message: getRiskMessage(prediction.risk_level),
     safeLocation: prediction.safe_location,
     alertSent: prediction.alert_sent,
-    timestamp: new Date(prediction.timestamp),
+    timestamp: Number.isNaN(parsedDate.getTime()) ? null : parsedDate,
   };
 }
 

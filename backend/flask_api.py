@@ -1,156 +1,201 @@
 """
-Flask API Server for Flood Prediction System
-Integrates the beautiful Next.js UI with ML model and Telegram alerts
+Flask API Server for Flood Prediction System.
+Integrates the Next.js UI with flood risk scoring and Telegram alerts.
 """
 
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-import os
-import sys
-import pickle
-import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-import requests
+import logging
+import math
+import os
+import pickle
+from typing import Any, Dict, Optional, Tuple
+
 from dotenv import load_dotenv
-import numpy as np
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+import requests
 
-# Fix JSON serialization for numpy types
-class NumpyEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        if isinstance(obj, np.floating):
-            return float(obj)
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        return super().default(obj)
 
-# Load environment variables
+class ValidationError(Exception):
+    """Raised when request payload validation fails."""
+
+
 load_dotenv()
 
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+)
+LOGGER = logging.getLogger("flood_api")
+
+
 app = Flask(__name__)
-CORS(app)  # Enable CORS for React frontend
 
-# Configuration
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN', '7992738661:AAFg2Mcr3QO6spwZNkyp7cRHe4AEbIgL77w')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID', '6407126519')
-MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'models', 'flood_model.pkl')
+allowed_origins_raw = os.getenv("ALLOWED_ORIGINS", "").strip()
+if allowed_origins_raw:
+    allowed_origins = [origin.strip() for origin in allowed_origins_raw.split(",") if origin.strip()]
+    CORS(app, resources={r"/*": {"origins": allowed_origins}})
+else:
+    CORS(app)
 
-# Global variables
-model = None
-safe_locations = [
+
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_TIMEOUT_SECONDS = float(os.getenv("TELEGRAM_TIMEOUT_SECONDS", "8"))
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "..", "models", "flood_model.pkl")
+
+RISK_CRITICAL = "critical"
+RISK_HIGH = "high"
+RISK_MEDIUM = "medium"
+RISK_LOW = "low"
+HIGH_RISK_LEVELS = {RISK_HIGH, RISK_CRITICAL}
+
+DISTRICTS = [
+    "Bagalkot", "Ballari", "Belagavi", "Bengaluru Rural", "Bengaluru Urban",
+    "Bijapur", "Chikballapur", "Chikmagalur", "Chitradurga", "Dakshina Kannada",
+    "Davangere", "Dharwad", "Gadag", "Hassan", "Haveri", "Kalaburagi", "Kodagu",
+    "Kolar", "Koppal", "Mandya", "Mangaluru", "Mysuru", "Raichur", "Ramanagara",
+    "Shivamogga", "Tumkur", "Udupi", "Uttara Kannada", "Vikarabad", "Vijayapura", "Yadgir",
+]
+
+SAFE_LOCATIONS = [
     {
         "id": 1,
         "name": "Kodagu High School - Evacuation Center",
         "location": [12.4392, 75.4991],
         "capacity": 500,
-        "type": "Educational Building"
+        "type": "Educational Building",
     },
     {
         "id": 2,
         "name": "Hassan District Hospital",
         "location": [13.3346, 75.9352],
         "capacity": 300,
-        "type": "Hospital"
+        "type": "Hospital",
     },
     {
         "id": 3,
         "name": "Uttara Kannada Community Center",
         "location": [14.5199, 74.6572],
         "capacity": 400,
-        "type": "Community Center"
+        "type": "Community Center",
     },
     {
         "id": 4,
         "name": "Chikmagalur National Park Office",
         "location": [13.3181, 75.4619],
         "capacity": 200,
-        "type": "Government Building"
+        "type": "Government Building",
     },
     {
         "id": 5,
         "name": "Dakshina Kannada Stadium",
         "location": [12.8476, 75.3736],
         "capacity": 1000,
-        "type": "Sports Complex"
-    }
+        "type": "Sports Complex",
+    },
 ]
 
-def load_model():
-    """Load the ML model from pickle file"""
-    global model
+
+MODEL = None
+ALERT_EXECUTOR = ThreadPoolExecutor(max_workers=4)
+
+
+def json_error(message: str, status: int = 400, details: Optional[Any] = None):
+    payload: Dict[str, Any] = {"error": message}
+    if details is not None:
+        payload["details"] = details
+    return jsonify(payload), status
+
+
+def load_model() -> bool:
+    """Load the ML model from pickle file for health visibility."""
+    global MODEL
     try:
-        if os.path.exists(MODEL_PATH):
-            with open(MODEL_PATH, 'rb') as f:
-                model = pickle.load(f)
-            print(f"Model loaded successfully from {MODEL_PATH}")
-            return True
-        else:
-            print(f"Model file not found at {MODEL_PATH}")
+        if not os.path.exists(MODEL_PATH):
+            LOGGER.warning("Model file not found at %s", MODEL_PATH)
             return False
-    except Exception as e:
-        print(f"Error loading model: {e}")
+        with open(MODEL_PATH, "rb") as file:
+            MODEL = pickle.load(file)
+        LOGGER.info("Model loaded successfully from %s", MODEL_PATH)
+        return True
+    except Exception:
+        LOGGER.exception("Failed to load model from %s", MODEL_PATH)
         return False
 
-def send_telegram_alert(message, location_data=None):
-    """
-    Send alert message to Telegram with optional safe location
-    """
-    try:
-        # Build message with safe location if provided
-        full_message = message
-        
-        if location_data:
-            full_message += f"\n\n🚨 SAFE EVACUATION LOCATION:\n"
-            full_message += f"📍 {location_data['name']}\n"
-            full_message += f"📊 Capacity: {location_data['capacity']} people\n"
-            full_message += f"🗺️ Coordinates: {location_data['location'][0]}, {location_data['location'][1]}\n"
-            full_message += f"ℹ️ Type: {location_data['type']}"
-        
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        payload = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": full_message,
-            "parse_mode": "HTML"
-        }
-        
-        response = requests.post(url, json=payload)
-        
-        if response.status_code == 200:
-            print("Telegram alert sent successfully")
-            return True
-        else:
-            print(f"Failed to send Telegram alert: {response.text}")
-            return False
-            
-    except Exception as e:
-        print(f"Error sending Telegram alert: {e}")
-        return False
 
-def classify_risk(risk_score):
-    """Classify risk level from normalized score (0-1)."""
-    if risk_score >= 0.75:
-        return "critical"
-    elif risk_score >= 0.55:
-        return "high"
-    elif risk_score >= 0.35:
-        return "medium"
-    else:
-        return "low"
-
-
-def clamp(value, min_value, max_value):
-    """Clamp numeric value into the provided bounds."""
+def clamp(value: float, min_value: float, max_value: float) -> float:
     return max(min_value, min(max_value, value))
 
 
-def district_factor(district):
-    """District susceptibility factor used in flood scoring."""
+def parse_bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def parse_float_field(
+    payload: Dict[str, Any],
+    key: str,
+    *,
+    default: Optional[float] = None,
+    min_value: Optional[float] = None,
+    max_value: Optional[float] = None,
+) -> float:
+    raw_value = payload.get(key, default)
+    if raw_value is None:
+        raise ValidationError(f"Missing parameter: {key}")
+    try:
+        parsed = float(raw_value)
+    except (TypeError, ValueError):
+        raise ValidationError(f"Invalid numeric value for {key}")
+
+    if math.isnan(parsed) or math.isinf(parsed):
+        raise ValidationError(f"Invalid numeric value for {key}")
+    if min_value is not None and parsed < min_value:
+        raise ValidationError(f"{key} must be >= {min_value}")
+    if max_value is not None and parsed > max_value:
+        raise ValidationError(f"{key} must be <= {max_value}")
+    return parsed
+
+
+def normalize_prediction_payload(data: Dict[str, Any]) -> Dict[str, Any]:
+    district = str(data.get("district", "Kodagu")).strip() or "Kodagu"
+    if len(district) > 64:
+        raise ValidationError("district is too long")
+
+    normalized = {
+        "district": district,
+        "rainfall_24h": data.get("rainfall_24h", data.get("rainfall")),
+        "rainfall_3h": data.get("rainfall_3h", data.get("discharge")),
+        "river_level": data.get("river_level", 0),
+        "elevation": data.get("elevation", 300),
+        "soil_moisture": data.get("soil_moisture", 0),
+        "latitude": data.get("latitude", 12.97),
+        "longitude": data.get("longitude", 77.59),
+    }
+
+    validated = {
+        "district": normalized["district"],
+        "rainfall_24h": parse_float_field(normalized, "rainfall_24h", min_value=0, max_value=1000),
+        "rainfall_3h": parse_float_field(normalized, "rainfall_3h", min_value=0, max_value=500),
+        "river_level": parse_float_field(normalized, "river_level", min_value=0, max_value=50),
+        "elevation": parse_float_field(normalized, "elevation", min_value=-500, max_value=9000),
+        "soil_moisture": parse_float_field(normalized, "soil_moisture", min_value=0, max_value=100),
+        "latitude": parse_float_field(normalized, "latitude", min_value=-90, max_value=90),
+        "longitude": parse_float_field(normalized, "longitude", min_value=-180, max_value=180),
+    }
+    return validated
+
+
+def district_factor(district: str) -> float:
     high_risk = {
-        "Kodagu", "Uttara Kannada", "Dakshina Kannada", "Udupi", "Shivamogga", "Chikmagalur"
+        "Kodagu", "Uttara Kannada", "Dakshina Kannada", "Udupi", "Shivamogga", "Chikmagalur",
     }
     medium_risk = {
-        "Hassan", "Mysuru", "Mandya", "Belagavi", "Dharwad", "Davangere"
+        "Hassan", "Mysuru", "Mandya", "Belagavi", "Dharwad", "Davangere",
     }
     if district in high_risk:
         return 1.0
@@ -159,8 +204,17 @@ def district_factor(district):
     return 0.65
 
 
-def calculate_risk_score(data):
-    """Deterministic risk score based on user-entered prediction parameters."""
+def classify_risk(risk_score: float) -> str:
+    if risk_score >= 0.75:
+        return RISK_CRITICAL
+    if risk_score >= 0.55:
+        return RISK_HIGH
+    if risk_score >= 0.35:
+        return RISK_MEDIUM
+    return RISK_LOW
+
+
+def calculate_risk_score(data: Dict[str, Any]) -> Tuple[float, Dict[str, float]]:
     rainfall_24h = float(data["rainfall_24h"])
     rainfall_3h = float(data["rainfall_3h"])
     river_level = float(data["river_level"])
@@ -168,7 +222,6 @@ def calculate_risk_score(data):
     soil_moisture = float(data["soil_moisture"])
     district = str(data["district"])
 
-    # Normalize each driver into [0, 1].
     rain24_score = clamp(rainfall_24h / 250.0, 0.0, 1.0)
     rain3_score = clamp(rainfall_3h / 80.0, 0.0, 1.0)
     river_score = clamp(river_level / 8.0, 0.0, 1.0)
@@ -176,7 +229,6 @@ def calculate_risk_score(data):
     soil_score = clamp(soil_moisture / 100.0, 0.0, 1.0)
     district_score = district_factor(district)
 
-    # Weighted base score.
     base_score = (
         0.28 * rain24_score
         + 0.16 * rain3_score
@@ -186,7 +238,6 @@ def calculate_risk_score(data):
         + 0.04 * district_score
     )
 
-    # Interaction bonuses for realistic flood escalation conditions.
     interaction_bonus = 0.0
     if rainfall_24h >= 120 and river_level >= 5.0:
         interaction_bonus += 0.12
@@ -195,7 +246,6 @@ def calculate_risk_score(data):
     if elevation <= 250 and river_level >= 4.0:
         interaction_bonus += 0.08
 
-    # Apply minimum-risk floors for severe single-parameter events.
     risk_floor = 0.0
     if rainfall_24h >= 130:
         risk_floor = max(risk_floor, 0.40)
@@ -223,249 +273,234 @@ def calculate_risk_score(data):
     return risk_score, components
 
 
-def find_nearest_safe_location(latitude, longitude):
-    """Find nearest safe evacuation location"""
-    import math
-    
-    min_distance = float('inf')
-    nearest_location = None
-    
-    for location in safe_locations:
-        lat, lon = location['location']
-        # Simple Euclidean distance (can be replaced with Haversine for accuracy)
-        distance = math.sqrt((lat - latitude)**2 + (lon - longitude)**2)
-        
-        if distance < min_distance:
-            min_distance = distance
-            nearest_location = location
-    
-    return nearest_location
+def find_nearest_safe_location(latitude: float, longitude: float) -> Dict[str, Any]:
+    nearest = min(
+        SAFE_LOCATIONS,
+        key=lambda location: math.hypot(location["location"][0] - latitude, location["location"][1] - longitude),
+    )
+    return nearest
 
-# ==================== API ENDPOINTS ====================
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Health check endpoint"""
-    return jsonify({
-        "status": "healthy",
-        "model_loaded": model is not None,
-        "timestamp": datetime.now().isoformat()
-    }), 200
+def build_alert_message(data: Dict[str, Any], risk_level: str, confidence: float) -> str:
+    return (
+        f"FLOOD ALERT - HIGH RISK DETECTED\n\n"
+        f"Risk Level: {risk_level.upper()}\n"
+        f"Risk Score: {confidence:.1f}%\n\n"
+        f"District: {data['district']}\n"
+        f"Location: Lat {data['latitude']}, Lon {data['longitude']}\n\n"
+        f"Environmental Parameters:\n"
+        f"- Rainfall (24h): {data['rainfall_24h']} mm\n"
+        f"- Rainfall (3h): {data['rainfall_3h']} mm\n"
+        f"- River Level: {data['river_level']} m\n"
+        f"- Elevation: {data['elevation']} m\n"
+        f"- Soil Moisture: {data['soil_moisture']}%\n\n"
+        "ACTION REQUIRED: EVACUATE IMMEDIATELY!"
+    )
 
-@app.route('/api/predict', methods=['POST'])
-def predict_flood_risk():
-    """
-    Predict flood risk based on district and hydrology inputs.
-    Expected JSON:
-    {
-        "district": "Kodagu",
-        "rainfall_24h": 85,
-        "rainfall_3h": 15,
-        "river_level": 4.9,
-        "elevation": 800,
-        "soil_moisture": 78.2,
-        "latitude": 12.97,
-        "longitude": 77.59
-    }
-    """
+
+def send_telegram_alert(message: str, location_data: Optional[Dict[str, Any]] = None) -> bool:
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        LOGGER.warning("Telegram alert skipped: TELEGRAM_TOKEN/TELEGRAM_CHAT_ID not configured")
+        return False
+
+    full_message = message
+    if location_data:
+        full_message += (
+            "\n\nSAFE EVACUATION LOCATION:\n"
+            f"- {location_data['name']}\n"
+            f"- Capacity: {location_data['capacity']} people\n"
+            f"- Coordinates: {location_data['location'][0]}, {location_data['location'][1]}\n"
+            f"- Type: {location_data['type']}"
+        )
+
     try:
-        data = request.get_json() or {}
+        response = requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": full_message},
+            timeout=TELEGRAM_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        return True
+    except requests.RequestException:
+        LOGGER.exception("Telegram alert failed")
+        return False
 
-        # Accept either new explicit keys or legacy keys for compatibility.
-        normalized = {
-            "district": data.get("district", "Kodagu"),
-            "rainfall_24h": data.get("rainfall_24h", data.get("rainfall")),
-            "rainfall_3h": data.get("rainfall_3h", data.get("discharge", 0)),
-            "river_level": data.get("river_level", 0),
-            "elevation": data.get("elevation", 300),
-            "soil_moisture": data.get("soil_moisture", 0),
-            "latitude": data.get("latitude", 12.97),
-            "longitude": data.get("longitude", 77.59),
+
+def queue_telegram_alert(message: str, location_data: Optional[Dict[str, Any]]) -> bool:
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        LOGGER.warning("Telegram alert skipped: TELEGRAM_TOKEN/TELEGRAM_CHAT_ID not configured")
+        return False
+    try:
+        ALERT_EXECUTOR.submit(send_telegram_alert, message, location_data)
+        return True
+    except RuntimeError:
+        LOGGER.exception("Failed to queue Telegram alert")
+        return False
+
+
+@app.route("/health", methods=["GET"])
+def health_check():
+    return jsonify(
+        {
+            "status": "healthy",
+            "model_loaded": MODEL is not None,
+            "telegram_configured": bool(TELEGRAM_TOKEN and TELEGRAM_CHAT_ID),
+            "timestamp": datetime.now().isoformat(),
         }
+    ), 200
 
-        required_params = [
-            "district", "rainfall_24h", "rainfall_3h", "river_level", "elevation", "soil_moisture"
-        ]
-        for param in required_params:
-            if normalized.get(param) is None:
-                return jsonify({"error": f"Missing parameter: {param}"}), 400
 
+@app.route("/api/predict", methods=["POST"])
+def predict_flood_risk():
+    try:
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return json_error("Invalid JSON payload", 400)
+
+        normalized = normalize_prediction_payload(data)
         risk_score, components = calculate_risk_score(normalized)
         risk_level = classify_risk(risk_score)
         confidence = risk_score * 100.0
-        is_high_risk = risk_level in ['high', 'critical']
-        
-        # Share nearest safe location only for high-risk cases.
+        is_high_risk = risk_level in HIGH_RISK_LEVELS
+
         safe_location = None
+        alert_sent = False
         if is_high_risk:
-            safe_location = find_nearest_safe_location(float(normalized['latitude']), float(normalized['longitude']))
-        
-        # If high risk, send Telegram alert
-        if is_high_risk:
-            alert_message = f"""
-🚨 <b>FLOOD ALERT - HIGH RISK DETECTED</b>
+            safe_location = find_nearest_safe_location(normalized["latitude"], normalized["longitude"])
+            alert_message = build_alert_message(normalized, risk_level, confidence)
+            alert_sent = queue_telegram_alert(alert_message, safe_location)
 
-📊 <b>Risk Level:</b> {risk_level.upper()}
-⚠️ <b>Risk Score:</b> {confidence:.1f}%
-
-📍 <b>District:</b> {normalized['district']}
-📍 <b>Location:</b> Lat {normalized['latitude']}, Lon {normalized['longitude']}
-
-🌧️ <b>Environmental Parameters:</b>
-• Rainfall (24h): {normalized['rainfall_24h']} mm
-• Rainfall (3h): {normalized['rainfall_3h']} mm
-• River Level: {normalized['river_level']} m
-• Elevation: {normalized['elevation']} m
-• Soil Moisture: {normalized['soil_moisture']}%
-
-<b>⚠️ ACTION REQUIRED: EVACUATE IMMEDIATELY!</b>
-"""
-            send_telegram_alert(alert_message, safe_location)
-        
         response = {
             "prediction": float(risk_score),
             "rule_score": float(risk_score),
             "risk_level": risk_level,
             "confidence": float(confidence),
             "parameters": {
-                "district": str(normalized['district']),
-                "rainfall_24h": float(normalized['rainfall_24h']),
-                "rainfall_3h": float(normalized['rainfall_3h']),
-                "river_level": float(normalized['river_level']),
-                "elevation": float(normalized['elevation']),
-                "soil_moisture": float(normalized['soil_moisture']),
-                "latitude": float(normalized['latitude']),
-                "longitude": float(normalized['longitude'])
+                "district": str(normalized["district"]),
+                "rainfall_24h": float(normalized["rainfall_24h"]),
+                "rainfall_3h": float(normalized["rainfall_3h"]),
+                "river_level": float(normalized["river_level"]),
+                "elevation": float(normalized["elevation"]),
+                "soil_moisture": float(normalized["soil_moisture"]),
+                "latitude": float(normalized["latitude"]),
+                "longitude": float(normalized["longitude"]),
             },
             "score_breakdown": components,
             "safe_location": safe_location,
-            "alert_sent": is_high_risk,
-            "timestamp": datetime.now().isoformat()
+            "alert_sent": alert_sent,
+            "timestamp": datetime.now().isoformat(),
         }
-        
         return jsonify(response), 200
-        
-    except Exception as e:
-        print(f"Error in predict endpoint: {e}")
-        return jsonify({"error": str(e)}), 500
+    except ValidationError as error:
+        return json_error(str(error), 400)
+    except Exception:
+        LOGGER.exception("Error in /api/predict")
+        return json_error("Internal server error", 500)
 
-@app.route('/api/alerts', methods=['GET'])
+
+@app.route("/api/alerts", methods=["GET"])
 def get_recent_alerts():
-    """Get recent alert history"""
     try:
-        # This would connect to a database in production
         alerts = [
             {
                 "id": 1,
                 "type": "flood_prediction",
                 "title": "High Flood Risk Detected",
                 "location": "Kodagu District",
-                "message": "ML model predicts 75% flood probability based on current parameters",
+                "message": "Risk model predicts high flood probability based on current parameters",
                 "severity": "high",
                 "timestamp": datetime.now().isoformat(),
                 "risk_level": "high",
-                "confidence": 75.5
+                "confidence": 75.5,
             }
         ]
-        
         return jsonify(alerts), 200
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        LOGGER.exception("Error in /api/alerts")
+        return json_error("Internal server error", 500)
 
-@app.route('/api/safe-locations', methods=['GET'])
+
+@app.route("/api/safe-locations", methods=["GET"])
 def get_safe_locations():
-    """Get all safe evacuation locations"""
     try:
-        # Optional filtering by latitude/longitude
-        latitude = request.args.get('latitude', type=float)
-        longitude = request.args.get('longitude', type=float)
-        
-        locations = safe_locations.copy()
-        
-        if latitude and longitude:
-            # Sort by distance
-            import math
-            locations = sorted(
-                locations,
-                key=lambda x: math.sqrt((x['location'][0] - latitude)**2 + (x['location'][1] - longitude)**2)
-            )
-        
+        latitude = request.args.get("latitude", type=float)
+        longitude = request.args.get("longitude", type=float)
+
+        if (latitude is None) != (longitude is None):
+            return json_error("latitude and longitude must be provided together", 400)
+
+        if latitude is None or longitude is None:
+            return jsonify(SAFE_LOCATIONS), 200
+
+        if latitude < -90 or latitude > 90 or longitude < -180 or longitude > 180:
+            return json_error("latitude/longitude out of range", 400)
+
+        locations = sorted(
+            SAFE_LOCATIONS,
+            key=lambda item: math.hypot(item["location"][0] - latitude, item["location"][1] - longitude),
+        )
         return jsonify(locations), 200
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        LOGGER.exception("Error in /api/safe-locations")
+        return json_error("Internal server error", 500)
 
-@app.route('/api/send-alert', methods=['POST'])
+
+@app.route("/api/send-alert", methods=["POST"])
 def send_alert():
-    """
-    Manually send alert to Telegram
-    Expected JSON:
-    {
-        "message": "Alert message",
-        "include_safe_location": true,
-        "latitude": 12.97,
-        "longitude": 77.59
-    }
-    """
     try:
-        data = request.get_json()
-        
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return json_error("Invalid JSON payload", 400)
+
+        message = str(data.get("message", "")).strip()
+        if not message:
+            return json_error("message is required", 400)
+        if len(message) > 4000:
+            return json_error("message exceeds Telegram length limit", 400)
+
+        include_safe_location = bool(data.get("include_safe_location"))
         safe_location = None
-        if data.get('include_safe_location') and data.get('latitude') and data.get('longitude'):
-            safe_location = find_nearest_safe_location(data['latitude'], data['longitude'])
-        
-        success = send_telegram_alert(data['message'], safe_location)
-        
-        return jsonify({
-            "success": success,
-            "message": "Alert sent" if success else "Failed to send alert"
-        }), 200 if success else 500
-        
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        if include_safe_location:
+            latitude = parse_float_field(data, "latitude", min_value=-90, max_value=90)
+            longitude = parse_float_field(data, "longitude", min_value=-180, max_value=180)
+            safe_location = find_nearest_safe_location(latitude, longitude)
 
-@app.route('/api/districts', methods=['GET'])
+        success = queue_telegram_alert(message, safe_location)
+        status_code = 202 if success else 500
+        return jsonify({"success": success, "message": "Alert queued" if success else "Failed to queue alert"}), status_code
+    except ValidationError as error:
+        return json_error(str(error), 400)
+    except Exception:
+        LOGGER.exception("Error in /api/send-alert")
+        return json_error("Internal server error", 500)
+
+
+@app.route("/api/districts", methods=["GET"])
 def get_districts():
-    """Get all Karnataka districts"""
-    districts = [
-        'Bagalkot', 'Ballari', 'Belagavi', 'Bengaluru Rural', 'Bengaluru Urban',
-        'Bijapur', 'Chikballapur', 'Chikmagalur', 'Chitradurga', 'Dakshina Kannada',
-        'Davangere', 'Dharwad', 'Gadag', 'Hassan', 'Haveri', 'Kalaburagi', 'Kodagu',
-        'Kolar', 'Koppal', 'Mandya', 'Mangaluru', 'Mysuru', 'Raichur', 'Ramanagara',
-        'Shivamogga', 'Tumkur', 'Udupi', 'Uttara Kannada', 'Vikarabad', 'Vijayapura', 'Yadgir'
-    ]
-    return jsonify(districts), 200
+    return jsonify(DISTRICTS), 200
 
-# ==================== ERROR HANDLERS ====================
 
 @app.errorhandler(404)
-def not_found(error):
-    return jsonify({"error": "Endpoint not found"}), 404
+def not_found(_error):
+    return json_error("Endpoint not found", 404)
+
 
 @app.errorhandler(500)
-def internal_error(error):
-    return jsonify({"error": "Internal server error"}), 500
+def internal_error(_error):
+    return json_error("Internal server error", 500)
 
-# ==================== MAIN ====================
 
-if __name__ == '__main__':
-    # Load model on startup
+if __name__ == "__main__":
     if not load_model():
-        print("Warning: Starting without model. Predictions will fail.")
-    
-    print("\n" + "="*50)
-    print("Flood Prediction API Server Starting")
-    print("="*50)
-    print("Server: http://localhost:5000")
-    print(f"Model: {'Loaded' if model else 'Not loaded'}")
-    print(f"Telegram: {'Configured' if TELEGRAM_TOKEN else 'Not configured'}")
-    print("="*50 + "\n")
-    
-    # Run Flask server
-    app.run(
-        host='0.0.0.0',
-        port=5000,
-        debug=True,
-        use_reloader=False
-    )
+        LOGGER.warning("Starting without a model loaded")
+
+    host = os.getenv("API_HOST", "0.0.0.0")
+    port = int(os.getenv("API_PORT", "5000"))
+    debug = parse_bool_env("API_DEBUG", False)
+
+    LOGGER.info("Flood Prediction API Server Starting")
+    LOGGER.info("Server: http://%s:%s", host, port)
+    LOGGER.info("Model: %s", "Loaded" if MODEL is not None else "Not loaded")
+    LOGGER.info("Telegram: %s", "Configured" if TELEGRAM_TOKEN and TELEGRAM_CHAT_ID else "Not configured")
+
+    app.run(host=host, port=port, debug=debug, use_reloader=False)
