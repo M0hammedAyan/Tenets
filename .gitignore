@@ -99,6 +99,8 @@ __pycache__/
 
 # Environment
 .env
+.env.example
+.env.local
 
 # Logs
 *.log
