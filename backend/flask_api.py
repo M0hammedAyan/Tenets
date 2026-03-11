@@ -33,7 +33,8 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for React frontend
 
 # Configuration
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
+# Accept TELEGRAM_TOKEN or the legacy TELEGRAM_BOT_TOKEN name interchangeably.
+TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN') or os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 MODEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'models', 'flood_model.pkl')
 
@@ -253,6 +254,7 @@ def health_check():
     return jsonify({
         "status": "healthy",
         "model_loaded": model is not None,
+        "telegram_configured": bool(TELEGRAM_TOKEN and TELEGRAM_CHAT_ID),
         "timestamp": datetime.now().isoformat()
     }), 200
 
@@ -443,6 +445,33 @@ def get_districts():
         'Shivamogga', 'Tumkur', 'Udupi', 'Uttara Kannada', 'Vikarabad', 'Vijayapura', 'Yadgir'
     ]
     return jsonify(districts), 200
+
+@app.route('/api/telegram/test', methods=['POST'])
+def test_telegram():
+    """
+    Send a test message to the configured Telegram bot to verify the integration
+    works on the deployed instance.
+
+    Returns 200 with success=true on success, 503 when credentials are missing,
+    or 500 when the Telegram API call fails.
+    """
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return jsonify({
+            "success": False,
+            "error": (
+                "Telegram credentials not configured. "
+                "Set the TELEGRAM_TOKEN and TELEGRAM_CHAT_ID environment variables."
+            )
+        }), 503
+
+    test_message = (
+        "✅ <b>Telegram integration test</b>\n"
+        "Your Flood Early Warning System is correctly configured to send Telegram alerts."
+    )
+    success = send_telegram_alert(test_message)
+    if success:
+        return jsonify({"success": True, "message": "Test message sent to Telegram"}), 200
+    return jsonify({"success": False, "error": "Failed to send test message; check server logs"}), 500
 
 # ==================== ERROR HANDLERS ====================
 
