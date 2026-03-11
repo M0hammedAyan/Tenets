@@ -3,10 +3,14 @@
  * Handles flood prediction, alerts, and safe location fetching
  */
 
-export const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000').replace(/\/+$/, '');
+const configuredApiBaseUrl = (process.env.NEXT_PUBLIC_API_URL || '').trim().replace(/\/+$/, '');
+export const API_BASE_URL = configuredApiBaseUrl || (process.env.NODE_ENV === 'development' ? 'http://localhost:5000' : '');
 const REQUEST_TIMEOUT_MS = Number(process.env.NEXT_PUBLIC_API_TIMEOUT_MS || 15000);
 
 function createApiUrl(path, queryParams) {
+  if (!API_BASE_URL) {
+    throw new Error('NEXT_PUBLIC_API_URL is not configured for this deployment. Set it to your backend URL in Netlify and redeploy.');
+  }
   const url = new URL(`${API_BASE_URL}${path}`);
   if (queryParams) {
     Object.entries(queryParams).forEach(([key, value]) => {
@@ -53,7 +57,7 @@ async function requestJson(path, options = {}, timeoutMs = REQUEST_TIMEOUT_MS, q
       throw new Error(`Request timed out after ${timeoutMs}ms`);
     }
     if (error instanceof TypeError) {
-      throw new Error(`Unable to reach backend API at ${API_BASE_URL}. Check deployment URL and CORS settings.`);
+      throw new Error(`Unable to reach backend API at ${API_BASE_URL || 'the configured backend URL'}. Check NEXT_PUBLIC_API_URL and backend CORS settings.`);
     }
     throw error;
   } finally {
