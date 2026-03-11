@@ -1,6 +1,6 @@
 // Utility for fetching live location data using the map API
 const API_KEY = process.env.NEXT_PUBLIC_MAP_API_KEY;
-const WEATHER_API_KEY = '59fd87e65a01d53bff3146e99fe5beeb';
+const WEATHER_API_KEY = process.env.NEXT_PUBLIC_OPENWEATHER_API_KEY;
 const WEATHER_BASE_URL = 'https://api.openweathermap.org/data/2.5';
 
 // Karnataka district coordinates for weather API calls
